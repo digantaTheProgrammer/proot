@@ -249,12 +249,8 @@ static int decrement_link_count(Tracee *tracee, Reg sysarg)
  * Make it so fake hard links look like real hard link with respect to number of links and inode
  * This function returns -errno if an error occured, otherwise 0.
  */
-static int handle_sysexit_end(Tracee *tracee)
+static int handle_sysexit_end(Tracee *tracee, word_t sysnum)
 {
-	word_t sysnum;
-
-	sysnum = get_sysnum(tracee, ORIGINAL);
-
 	switch (sysnum) {
 
 	case PR_fstatat64:                 //int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags);
@@ -415,6 +411,8 @@ int link2symlink_callback(Extension *extension, ExtensionEvent event,
 			intptr_t data1, intptr_t data2 UNUSED)
 {
 	int status;
+	Tracee *tracee = TRACEE(extension);
+	word_t sysnum = get_sysnum(tracee, ORIGINAL);
 
 	switch (event) {
 	case INITIALIZATION: {
@@ -442,9 +440,7 @@ int link2symlink_callback(Extension *extension, ExtensionEvent event,
 	}
 
 	case SYSCALL_ENTER_END: {
-		Tracee *tracee = TRACEE(extension);
-
-		switch (get_sysnum(tracee, ORIGINAL)) {
+		switch (sysnum) {
 		case PR_rename:
 			/*int rename(const char *oldpath, const char *newpath);
 			 *If newpath is a psuedo hard link decrement the link count.
@@ -544,13 +540,35 @@ int link2symlink_callback(Extension *extension, ExtensionEvent event,
 	}
 
 	case SYSCALL_EXIT_END: {
-		return handle_sysexit_end(TRACEE(extension));
+		return handle_sysexit_end(tracee, sysnum);
 	}
 
-	case TRANSLATED_PATH:
-		translated_path((char *) data1);
-		return 0;
-
+	case TRANSLATED_PATH: {
+		switch (sysnum) {
+		/**
+		 * We don't want to translate fake hard links to the backing file incase of deletion since the backing file will be referenced by other fake hard links
+		 * Deletion of the original file i.e. this particular fake hard link needs additional handling implemented in decrement_link_count()
+		*/
+		case PR_unlink:
+		case PR_unlinkat:
+		/**
+		 * During new link creation to an existing fake hard link, underlying backing file only needs to be updated with the reference count (implemented in move_and_symlink_path())
+		 * Translating to backing file will cause the backing file to be itself a fake hard link, breaking the assumption of existing_fake_hard_link -> intermediate -> final_backing_file
+		*/
+		case PR_link:
+		case PR_linkat:
+		/**
+		 * Same as deletion
+		*/
+		case PR_rename:
+		case PR_renameat:
+		case PR_renameat2:
+			return 0;
+		default:
+			translated_path((char *) data1);
+			return 0;
+		}
+	}
 	default:
 		return 0;
 	}
