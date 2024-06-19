@@ -68,7 +68,7 @@ static int move_and_symlink_path(Tracee *tracee, Reg sysarg)
 	/* Sanity check: directories can't be linked.  */
 	status = lstat(original, &statl);
 	if (status < 0)
-		return status;
+		return -errno;
 	if (S_ISDIR(statl.st_mode))
 		return -EPERM;
 
@@ -116,17 +116,17 @@ static int move_and_symlink_path(Tracee *tracee, Reg sysarg)
 		strcat(final, ".0002");
 		status = rename(original, final);
 		if (status < 0)
-			return status;
+			return -errno;
 
 		/* Symlink the intermediate to the final file.  */
 		status = symlink(final, intermediate);
 		if (status < 0)
-			return status;
+			return -errno;
 
 		/* Symlink the original path to the intermediate one.  */
 			status = symlink(intermediate, original);
 			if (status < 0)
-			return status;
+			return -errno;
 	} else {
 		/*Move the original content to new location, by incrementing count at end of path. */
 		size = my_readlink(intermediate, final);
@@ -141,20 +141,20 @@ static int move_and_symlink_path(Tracee *tracee, Reg sysarg)
 
 		status = rename(final, new_final);
 		if (status < 0)
-			return status;
+			return -errno;
 		strcpy(final, new_final);
 		/* Symlink the intermediate to the final file.  */
 		status = unlink(intermediate);
 		if (status < 0)
-			return status;
+			return -errno;
 		status = symlink(final, intermediate);
 		if (status < 0)
-			return status;
+			return -errno;
 	}
 
 	status = set_sysarg_path(tracee, intermediate, sysarg);
 	if (status < 0)
-		return status;
+		return -errno;
 
 	return 0;
 }
